@@ -2,7 +2,9 @@ package justLR;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.IOException;
 import java.util.Arrays;
 
 import Utils.SUtils;
@@ -31,11 +33,15 @@ public class justLR {
 
 	private boolean m_MVerb = false; 							 // -V
 	private double m_Eta = 0.01;                                 // -E
-	
+
 	private double m_Lambda = 0.001;						// -L
 	private boolean m_DoRegularization = false;			// -R
 	private String m_O = "sgd";                                   	// -O
-	
+
+	private int m_NumIterations = 1;                            // -I
+
+	private int m_BufferSize = 1;                                  // -B
+
 	private static final int BUFFER_SIZE = 100000;
 
 
@@ -46,17 +52,6 @@ public class justLR {
 		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 		this.structure = reader.getStructure();
 		structure.setClassIndex(structure.numAttributes() - 1);
-
-		System.out.println("Experiment Configuration");
-		System.out.println(" ----------------------------------- ");
-		System.out.println("m_O = " + m_O);
-		System.out.println("m_DoRegularization = " + m_DoRegularization);
-		if (m_DoRegularization) {
-			System.out.println("m_Lambda = " + m_Lambda);
-			
-		}
-		System.out.println("m_Eta = " + m_Eta);
-		System.out.println(" ----------------------------------- ");
 
 		// remove instances with missing class
 		n = structure.numAttributes() - 1;
@@ -92,49 +87,172 @@ public class justLR {
 		System.out.println("Model is of Size: " + np);
 		Arrays.fill(parameters, 0.0);
 
+		System.out.println("Experiment Configuration");
+		System.out.println(" ----------------------------------- ");
+		System.out.println("m_O = " + m_O);
+		System.out.println("Iterations = " + m_NumIterations);
+		System.out.println("m_DoRegularization = " + m_DoRegularization);
+		if (m_DoRegularization) {
+			System.out.println("m_Lambda = " + m_Lambda);
+
+		}
+
 		/* 
 		 * ------------------------------------------------------
 		 * Optimization
 		 * ------------------------------------------------------
 		 */
 
-		if (m_O.equalsIgnoreCase("sgd")) {
+		if (m_O.equalsIgnoreCase("adaptive")) {
 
-			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			doAdaptive(sourceFile);
+
+		} else if (m_O.equalsIgnoreCase("sgd")) {
+
+			doSGD(sourceFile);
+
+		} else if (m_O.equalsIgnoreCase("adagrad")) {
+
+			doAdagrad(sourceFile);
+
+		} else if (m_O.equalsIgnoreCase("adadelta")) {
+
+			doAdadelta(sourceFile);
+
+		} else if (m_O.equalsIgnoreCase("nplr")) {
+
+			doNplr(sourceFile);
+
+		}
+
+	}
+
+	private void doAdaptive(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("StepSize = " + m_Eta);
+		System.out.println(" ----------------------------------- ");
+
+		System.out.print("fx_ADAPTIVE = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		double[] gradients = new double[np];
+
+		int t = 1;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 			this.structure = reader.getStructure();
 			structure.setClassIndex(structure.numAttributes() - 1);
 
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
 
-				double[] gradients = new double[np];
-
 				int x_C = (int) row.classValue();
 				double[] probs = predict(row);
 				SUtils.exp(probs);
 
 				computeGrad(row, probs, x_C, gradients);
-				
+
 				if (m_DoRegularization) {
 					regularizeGradient(gradients);
 				}
 
-				double stepSize = m_Eta;
-				for (int i = 0; i < np; i++) {
-					parameters[i] = parameters[i] - stepSize * gradients[i];
+				if (t % m_BufferSize == 0) {
+					double stepSize = (m_DoRegularization) ? (m_Eta / (1 + t)) : (m_Eta / (1 + (m_Lambda * t)));
+					for (int i = 0; i < np; i++) {
+						parameters[i] = parameters[i] - stepSize * gradients[i];
+					}
+
+					gradients = new double[np];
 				}
 
+				t++;
 			}
 
-		} else if (m_O.equalsIgnoreCase("adagrad")) {
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
 
-			double smoothingParameter = 1e-9;
+	}
 
-			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+	private void doSGD(File sourceFile) throws FileNotFoundException, IOException {
+
+		System.out.println("StepSize = " + m_Eta);
+		System.out.println(" ----------------------------------- ");
+
+		System.out.print("fx_SGD = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		double[] gradients = new double[np];
+
+		int t = 1;
+
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 			this.structure = reader.getStructure();
 			structure.setClassIndex(structure.numAttributes() - 1);
 
-			double[] G = new double[np];
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
+
+				computeGrad(row, probs, x_C, gradients);
+
+				if (m_DoRegularization) {
+					regularizeGradient(gradients);
+				}
+
+				if (t % m_BufferSize == 0) {
+					double stepSize = m_Eta;
+					for (int i = 0; i < np; i++) {
+						parameters[i] = parameters[i] - stepSize * gradients[i];
+					}
+
+					gradients = new double[np];
+				}
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private void doAdagrad(File sourceFile) throws FileNotFoundException, IOException {
+
+		double smoothingParameter = 1e-9;
+
+		System.out.println("Eta_0 = " + m_Eta);
+		System.out.println("SmoothingParameter = " + smoothingParameter);
+		System.out.println(" ----------------------------------- ");
+
+		double[] G = new double[np];
+
+		System.out.print("fx_ADAGRAD = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
 
 			Instance row;
 			while ((row = reader.readInstance(structure)) != null)  {
@@ -146,7 +264,7 @@ public class justLR {
 				SUtils.exp(probs);
 
 				computeGrad(row, probs, x_C, gradients);
-				
+
 				if (m_DoRegularization) {
 					regularizeGradient(gradients);
 				}
@@ -167,33 +285,116 @@ public class justLR {
 				for (int i = 0; i < np; i++) {
 					parameters[i] = parameters[i] - stepSize[i] * gradients[i];
 				}
+
+				t++;
 			}
 
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
 
-		} else if (m_O.equalsIgnoreCase("plr")) {
+	}
 
-			reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+	private void doAdadelta(File sourceFile) throws FileNotFoundException, IOException {
+
+		double rho = m_Eta;
+		double smoothingParameter = 1e-9;
+
+		System.out.println("rho = " + m_Eta);
+		System.out.println("SmoothingParameter = " + smoothingParameter);
+		System.out.println(" ----------------------------------- ");
+
+		double[] G = new double[np];
+		double[] D = new double[np];
+
+		System.out.print("fx_ADADELTA = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
 			this.structure = reader.getStructure();
 			structure.setClassIndex(structure.numAttributes() - 1);
 
-			double epsilon = 1e-9;
+			Instance row;
+			while ((row = reader.readInstance(structure)) != null)  {
 
-			double[] gbar = new double[np];
-			double[] vbar = new double[np];
-			double[] hbar = new double[np];
-			double[] vpart = new double[np];
-			double[] taus = new double[np];
+				double[] gradients = new double[np];
 
-			for (int i = 0; i < np; i++) {
-				gbar[i] = 0;
-				vbar[i] = 1.0 * epsilon;
-				hbar[i] = 1.0;
+				int x_C = (int) row.classValue();
+				double[] probs = predict(row);
+				SUtils.exp(probs);
 
-				vpart[i] = (gbar[i] * gbar[i]) / vbar[i];
-				taus[i] = (1.0 + epsilon) * 2;
+				computeGrad(row, probs, x_C, gradients);
+
+				if (m_DoRegularization) {
+					regularizeGradient(gradients);
+				}
+
+				double stepSize[] = new double[np];
+
+				for (int i = 0; i < np; i++) {
+					G[i] = (rho * G[i]) + ((1 - rho) * (gradients[i] * gradients[i]));
+
+					stepSize[i] = - ((Math.sqrt(D[i] + smoothingParameter)) / (Math.sqrt(G[i] + smoothingParameter))) * gradients[i];
+
+					D[i] = (rho * D[i]) + ((1.0 - rho) * (stepSize[i] * stepSize[i]));
+
+					parameters[i] = parameters[i] + stepSize[i];
+				}
+
+				t++;
 			}
 
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	private void doNplr(File sourceFile) throws FileNotFoundException, IOException {
+
+		double epsilon = 1e-9;
+
+		System.out.println("Epsilon (smoothing) = " + epsilon);
+		System.out.println(" ----------------------------------- ");
+
+		double[] gbar = new double[np];
+		double[] vbar = new double[np];
+		double[] hbar = new double[np];
+		double[] vpart = new double[np];
+		double[] taus = new double[np];
+
+		for (int i = 0; i < np; i++) {
+			gbar[i] = 0;
+			vbar[i] = 1.0 * epsilon;
+			hbar[i] = 1.0;
+
+			vpart[i] = (gbar[i] * gbar[i]) / vbar[i];
+			taus[i] = (1.0 + epsilon) * 2;
+		}
+
+		System.out.print("fx_NPLR = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		int t = 0;
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
 			Instance row;
+
 			while ((row = reader.readInstance(structure)) != null)  {
 
 				double[] gradients = new double[np];
@@ -205,36 +406,62 @@ public class justLR {
 
 				computeGrad(row, probs, x_C, gradients);
 				computeHessian(row, probs, x_C, hessians);			
-				
+
 				if (m_DoRegularization) {
 					regularizeGradient(gradients);
 					regularizeHessian(hessians);
 				}
+
+				double stepSize[] = new double[np];
 
 				for (int j = 0; j < np; j++) {
 					gbar[j] = (1 - 1/taus[j]) * gbar[j] + 1/taus[j] * gradients[j];
 					vbar[j] = (1 - 1/taus[j]) * vbar[j] + 1/taus[j] * gradients[j] * gradients[j];
 					hbar[j] = (1 - 1/taus[j]) * hbar[j] + 1/taus[j] * hessians[j];
 
-					vpart[j] = 0;
-					vpart[j] = vpart[j] + (gbar[j] * gbar[j]) / vbar[j];
+					//					vpart[j] = 0;
+					//					vpart[j] = vpart[j] + (gbar[j] * gbar[j]) / vbar[j];
+					//
+					//					taus[j] = (1 - vpart[j]) * taus[j];
+					//					taus[j] += (1 + epsilon);
+					//
+					//					stepSize[j] = vpart[j] / (hbar[j] + epsilon);
 
-					taus[j] = (1 - vpart[j]) * taus[j];
-					taus[j] += (1 + epsilon);
+					stepSize[j] = (gbar[j] * gbar[j]) / (hbar[j] * vbar[j]);
+					taus[j] = (1 - (gbar[j] * gbar[j])/vbar[j]) * taus[j] + 1;
+
+					parameters[j] = parameters[j] - stepSize[j] * gradients[j];
 				}
 
-				double stepSize[] = new double[np];
-				for (int j = 0; j < np; j++) {
-					stepSize[j] = vpart[j] / (hbar[j] + epsilon);
-				}
-
-				for (int i = 0; i < np; i++) {
-					parameters[i] = parameters[i] - stepSize[i] * gradients[i];
-				}
-
+				t++;
 			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
+		System.out.println("Did: " + t + " updates.");
+
+	}
+
+	public double evaluateFunction(File sourceFile) throws IOException {
+		double f = 0;
+		double mLogNC = - Math.log(nc);
+
+		ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+		this.structure = reader.getStructure();
+		structure.setClassIndex(structure.numAttributes() - 1);
+
+		Instance row;
+		while ((row = reader.readInstance(structure)) != null)  {
+
+			int x_C = (int) row.classValue();
+			double[] probs = predict(row);
+
+			f += mLogNC - probs[x_C];
 		}
 
+		return f;
 	}
 
 	public double[] distributionForInstance(Instance inst) {
@@ -355,7 +582,7 @@ public class justLR {
 			grad[i] += m_Lambda * parameters[i];
 		}
 	}
-	
+
 	public void regularizeHessian(double[] hessians) {
 		for (int i = 0; i < np; i++) {
 			hessians[i] += m_Lambda;
@@ -401,7 +628,7 @@ public class justLR {
 	public boolean isM_MVerb() {
 		return m_MVerb;
 	}
-	
+
 	public void setM_MVerb(boolean m_MVerb) {
 		this.m_MVerb = m_MVerb;
 	}
@@ -413,7 +640,7 @@ public class justLR {
 	public void setM_O(String m_O) {
 		this.m_O = m_O;
 	}
-	
+
 	public boolean isM_DoRegularization() {
 		return m_DoRegularization;
 	}
@@ -421,7 +648,7 @@ public class justLR {
 	public void setM_DoRegularization(boolean m_DoRegularization) {
 		this.m_DoRegularization = m_DoRegularization;
 	}
-	
+
 	public double getM_Lambda() {
 		return m_Lambda;
 	}
@@ -429,7 +656,7 @@ public class justLR {
 	public void setM_Lambda(double m_Lambda) {
 		this.m_Lambda = m_Lambda;
 	}
-	
+
 	public double getM_Eta() {
 		return m_Eta;
 	}
@@ -440,6 +667,22 @@ public class justLR {
 
 	public int getnAttributes() {
 		return n;
+	}
+
+	public int getM_NumIterations() {
+		return m_NumIterations;
+	}
+
+	public int getM_BufferSize() {
+		return m_BufferSize;
+	}
+
+	public void setM_BufferSize(int m_BufferSize) {
+		this.m_BufferSize = m_BufferSize;
+	}
+
+	public void setM_NumIterations(int m_NumIterations) {
+		this.m_NumIterations = m_NumIterations;
 	}
 
 	public int getNumericPosition(int u, int c) {

@@ -27,6 +27,9 @@ public class TwoFoldXValOOCFupla {
 	private static boolean m_DoRegularization = false;			// -R
 	private static double m_Lambda = 0.001;						// -L
 	private static double m_Eta = 0.01;                                 // -E
+	
+	private static int m_NumIterations = 1;                           // -I
+	private static int m_BufferSize = 1;                           // -B
 
 	private static Instances instances = null;
 	private static int m_nExp = 5;
@@ -101,6 +104,8 @@ public class TwoFoldXValOOCFupla {
 			if (m_DoRegularization) {
 				learner.setM_Lambda(m_Lambda);
 			}
+			learner.setM_NumIterations(m_NumIterations);
+			learner.setM_BufferSize(m_BufferSize);
 
 			// creating tempFile for train0
 			File trainFile = createTrainTmpFile(sourceFile, structure, test0Indexes);
@@ -181,6 +186,8 @@ public class TwoFoldXValOOCFupla {
 			if (m_DoRegularization) {
 				learner.setM_Lambda(m_Lambda);
 			}
+			learner.setM_NumIterations(m_NumIterations);
+			learner.setM_BufferSize(m_BufferSize);
 
 			// creating tempFile for train0
 			trainFile = createTrainTmpFile(sourceFile, structure, test1Indexes);
@@ -297,7 +304,17 @@ public class TwoFoldXValOOCFupla {
 		if (strX.length() != 0) {
 			m_nExp = Integer.valueOf(strX);
 		}
-
+		
+		String strI = Utils.getOption('I', options);
+		if (strI.length() != 0) {
+			m_NumIterations = Integer.valueOf(strI);
+		}
+		
+		String strB = Utils.getOption('B', options);
+		if (strB.length() != 0) {
+			m_BufferSize = Integer.valueOf(strB);
+		}
+		
 		String Soutput = Utils.getOption('O', options);
 		if (Soutput.length() != 0) {
 			m_O = Soutput;
