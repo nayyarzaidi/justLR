@@ -6,6 +6,8 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.Queue;
 
 import Utils.SUtils;
 import weka.core.converters.ArffLoader.ArffReader;
@@ -123,7 +125,77 @@ public class justLR {
 
 			doNplr(sourceFile);
 
+		} else if (m_O.equalsIgnoreCase("abuffer")) {
+
+			doAbufferr(sourceFile);
+
 		}
+
+	}
+
+	private void doAbufferr(File sourceFile) throws FileNotFoundException, IOException {
+		
+		int bufferSize  = 10;
+
+		System.out.println("Buffer Size = " + bufferSize);
+		System.out.println("m_Eta= " + m_Eta);
+		System.out.println(" ----------------------------------- ");
+
+		System.out.print("fx_ABUFFER = [");
+
+		double f = evaluateFunction(sourceFile);
+		System.out.print(f + ", ");
+
+		double[] gradients = new double[np];
+
+		LinkedList<Instance> queue = new LinkedList<Instance>();
+
+		for (int iter = 0; iter < m_NumIterations; iter++) {
+
+			ArffReader reader = new ArffReader(new BufferedReader(new FileReader(sourceFile), BUFFER_SIZE), 10000);
+			this.structure = reader.getStructure();
+			structure.setClassIndex(structure.numAttributes() - 1);
+
+			Instance row;
+			int t = 0;
+
+			while ((row = reader.readInstance(structure)) != null)  {
+
+				if (t < bufferSize) {
+					queue.add(row);
+				} else {
+					
+					gradients = new double[np];
+					
+					for (int i = 0; i < queue.size(); i++) {
+						Instance inst = queue.get(i);
+						
+						int x_C = (int) inst.classValue();
+						double[] probs = predict(inst);
+						SUtils.exp(probs);
+
+						computeGrad(inst, probs, x_C, gradients);
+					}
+
+					if (m_DoRegularization) {
+						regularizeGradient(gradients);
+					}
+
+					for (int i = 0; i < np; i++) {
+						parameters[i] = parameters[i] - m_Eta * gradients[i];
+					}
+
+					queue.remove();
+					queue.add(row);
+				}
+
+				t++;
+			}
+
+			f = evaluateFunction(sourceFile);
+			System.out.print(f + ", ");
+		}
+		System.out.println("];");
 
 	}
 
@@ -182,6 +254,7 @@ public class justLR {
 	private void doSGD(File sourceFile) throws FileNotFoundException, IOException {
 
 		System.out.println("StepSize = " + m_Eta);
+		System.out.println("BufferSize = " + m_BufferSize);
 		System.out.println(" ----------------------------------- ");
 
 		System.out.print("fx_SGD = [");

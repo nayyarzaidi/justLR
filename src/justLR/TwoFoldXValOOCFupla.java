@@ -334,7 +334,6 @@ public class TwoFoldXValOOCFupla {
 			m_Eta = Double.valueOf(strE);
 		}
 		
-
 		Utils.checkForRemainingOptions(options);
 
 	}
